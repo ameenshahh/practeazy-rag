@@ -1,51 +1,63 @@
 import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+
+import { QuestionEntity } from '../entities/question.entity';
 
 import { EmbeddingService } from '../embeddings/embedding.service';
-import { SimilarityService } from './similarity.service';
-
-import {
-  EmbeddedQuestion,
-  SearchResult,
-} from '../types/question.types';
 
 @Injectable()
 export class VectorSearchService {
+
   constructor(
-    private readonly embeddingService: EmbeddingService,
-    private readonly similarityService: SimilarityService,
+
+    @InjectRepository(QuestionEntity)
+    private readonly repository:
+      Repository<QuestionEntity>,
+
+    private readonly embeddingService:
+      EmbeddingService,
   ) {}
 
   async search(
     query: string,
-    questions: EmbeddedQuestion[],
     limit = 5,
-  ): Promise<SearchResult[]> {
+  ) {
 
-    // 1. Convert search query into vector
     const queryEmbedding =
-      await this.embeddingService.embed(query);
+      await this.embeddingService.embed(
+        query,
+      );
 
-    // 2. Compare query vector against every question
-    const results = questions.map((question) => {
-      const similarity =
-        this.similarityService.cosineSimilarity(
-          queryEmbedding,
-          question.embedding,
-        );
+    const vector =
+      `[${queryEmbedding.join(',')}]`;
 
-      return {
-        questionNumber: question.questionNumber,
-        content: question.content,
-        similarity,
-      };
-    });
+    return this.repository
+      .createQueryBuilder('question')
 
-    // 3. Highest similarity first
-    results.sort(
-      (a, b) => b.similarity - a.similarity,
-    );
+      .select([
+        'question.id',
+        'question.questionNumber',
+        'question.content',
+      ])
 
-    // 4. Return Top K
-    return results.slice(0, limit);
+      .addSelect(
+        'question.embedding <=> :embedding',
+        'distance',
+      )
+
+      .setParameter(
+        'embedding',
+        vector,
+      )
+
+      .orderBy(
+        'question.embedding <=> :embedding',
+        'ASC',
+      )
+
+      .limit(limit)
+
+      .getRawMany();
   }
 }

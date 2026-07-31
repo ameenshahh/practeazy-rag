@@ -8,6 +8,7 @@ import { VectorSearchService } from './retrieval/vector-search.service';
 import {
   EmbeddedQuestion,
 } from './types/question.types';
+import { QuestionRepository } from './repositories/question.repository';
 
 @Injectable()
 export class RagService {
@@ -19,43 +20,42 @@ export class RagService {
     private readonly questionParserService: QuestionParserService,
     private readonly embeddingService: EmbeddingService,
     private readonly vectorSearchService: VectorSearchService,
+    private readonly questionRepository: QuestionRepository,
   ) {}
 
-  async ingestPdf(filePath: string) {
+  async ingestPdf(
+    filePath: string,
+  ) {
 
-    // 1. Extract PDF text
     const text =
       await this.pdfLoaderService.extractText(
         filePath,
       );
 
-    // 2. Extract individual questions
-    const parsedQuestions =
+    const questions =
       this.questionParserService.parse(text);
 
-    // 3. Generate embedding for every question
-    const embeddedQuestions: EmbeddedQuestion[] =
-      [];
-
-    for (const question of parsedQuestions) {
+    for (const question of questions) {
 
       const embedding =
         await this.embeddingService.embed(
           question.content,
         );
 
-      embeddedQuestions.push({
-        ...question,
+      await this.questionRepository.create({
+        questionNumber:
+          question.questionNumber,
+
+        content:
+          question.content,
+
         embedding,
       });
     }
 
-    // temporary in-memory storage
-    this.questions = embeddedQuestions;
-
     return {
       questionsProcessed:
-        embeddedQuestions.length,
+        questions.length,
     };
   }
 
@@ -63,17 +63,12 @@ export class RagService {
     query: string,
     limit = 5,
   ) {
-
-    if (this.questions.length === 0) {
-      throw new Error(
-        'No questions have been ingested',
-      );
-    }
-
+  
     return this.vectorSearchService.search(
       query,
-      this.questions,
       limit,
     );
   }
+
+
 }
